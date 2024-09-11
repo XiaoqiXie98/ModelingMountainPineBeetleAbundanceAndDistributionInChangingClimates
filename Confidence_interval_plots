@@ -41,7 +41,7 @@ x=z=as.matrix(cbind(1,d_o1))#add vector 1 for the intercept
 ################################################################################
 #The climate change data contains 10000 cells including 9810 cells we used. The the following section, I will find out the positions of these 9810 cells in the dataset with 10000 cells through matching the coordinates.
 ################################################################################
-load(here("Desktop/University of Alberta/Thesis/Code(server）/Chapter_4/data_10000cells.RData"))#load the area 1 data
+load(here("data_10000cells.RData"))#load the area 1 data
 data_10000=data.frame(data)#rename data
 xy_10000=unique(data_10000[,1:2])#extract coordinates of cell center in area 1
 xy_9810=data_9810[1:9810,2:3]#extract unique xy coordinates
