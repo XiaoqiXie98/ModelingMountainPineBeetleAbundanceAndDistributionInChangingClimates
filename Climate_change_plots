@@ -1,0 +1,903 @@
+library(here)
+library(ggplot2)
+library(dplyr)
+library(viridis)
+library(pscl)
+library(data.table)
+library(LaplacesDemon)
+#In this script, I made use of three data set. data_9810: a dataset contains 9810 cells; data_10000: dataset contains 10000cells.
+#all cells in data_9810 are covered in both data_10000.
+getwd()#check current directory
+load(here("data_9810cells.RData"))
+data_9810=data
+#remove locations without detection.
+data1=data_9810[-which(data_9810$mz==0&data_9810$Infestations==0),]
+#remove unused columns including age squared, height, last year infestations within 0.75, 1.25, and 4
+data2=data1[,-c(1:7,9:11,13:15,21,23)]
+data_o=data2[which(data1$year<2015),]#outbreak data (2007-2014)
+x_o=scale(data_o,center=T,scale=T)#standardized data
+y_o=data1$Infestations[which(data1$year<2015)]#the number of infestations (2007-2014)
+#we use the same input data for the presence and abundance models.
+outbreak=zeroinfl(y_o~.,data=data.frame(cbind(x_o,y_o)),dist="negbin")#fit model
+#######################################################################################################################################
+#return the non-standardized coefficients
+f=function(beta0,coeff,data){
+  mu=apply(data,2,mean)
+  std=apply(data,2,sd)
+  intercept=beta0-sum(coeff*mu/std)
+  beta=coeff/std
+  return(c(intercept,beta))
+}
+
+#outbreak
+cx=round(outbreak$coefficients$count,5)#coefficients of the abundance model
+cx1=f(cx[1],cx[-1],data_o)#return non-standardized
+cz=round(outbreak$coefficients$zero,5)#coefficients of the presence model
+cz1=f(cz[1],cz[-1],data_o)#return non-standardized
+d_o=data_9810%>%filter(year<2015)#outbreak(2007-2014)
+d_o1=d_o[,-c(1:7,9:11,13:15,21,23)]#remove unused columns
+x=z=as.matrix(cbind(1,d_o1))#add vector 1 for the intercept
+
+################################################################################
+#The climate change data contains 10000 cells including 9810 cells we used. The the following section, I will find out the positions of these 9810 cells in the dataset with 10000 cells through matching the coordinates.
+################################################################################
+load(here("data_10000cells.RData"))#load the area 1 data
+data_10000=data.frame(data)#rename data
+xy_10000=unique(data_10000[,1:2])#extract coordinates of cell center in area 1
+xy_9810=data_9810[1:9810,2:3]#extract unique xy coordinates
+# Find the matching row numbers
+id_xy1 <- paste(xy_10000$x, xy_10000$y, sep="-")
+id_xy2 <- paste(xy_9810$x, xy_9810$y, sep="-")
+matching_rows <- match(id_xy2, id_xy1)#the positions of 9810 cells in the bigger dataset with 10000 cells.
+
+#abbreviations: overwinter survival probability (ct), soil moisture index (smi), relative humidity (rh), degree days (dd)
+#45: rcp 4.5; 26: rcp 2.6, 85: rcp 8.5
+#extract 9810 cells climate change data from a data with 10000 cells.
+ct=fread(here("RCP_data/Area1(10000cells)/ct45_2100.csv"))#load climate change data
+ct45=ct$`mean(Psurv)`[matching_rows]#extract values for 9810 cells
+
+smi=fread(here("RCP_data/Area1(10000cells)/smi45_2100.csv"))
+smi45=smi$`mean(SMImean)`[matching_rows]#extract values for 9810 cells
+
+rh=fread(here("RCP_data/Area1(10000cells)/rh45_2100.csv"))
+rh45=rh$`mean(\`Relative Humidity\`)`[matching_rows]#extract values for 9810 cells
+
+dd=fread(here("RCP_data/Area1(10000cells)/dd45_2100.csv"))
+dd45=dd$V2[matching_rows]#extract values for 9810 cells
+
+ct=fread(here("RCP_data/Area1(10000cells)/ct26_2100.csv"))
+ct26=ct$`mean(Psurv)`[matching_rows]#extract values for 9810 cells
+
+smi=fread(here("RCP_data/Area1(10000cells)/smi26_2100.csv"))
+smi26=smi$`mean(SMImean)`[matching_rows]#extract values for 9810 cells
+
+rh=fread(here("RCP_data/Area1(10000cells)/rh26_2100.csv"))
+rh26=rh$`mean(\`Relative Humidity\`)`[matching_rows]#extract values for 9810 cells
+
+dd=fread(here("RCP_data/Area1(10000cells)/dd26_2100.csv"))
+dd26=dd$V2[matching_rows]#extract values for 9810 cells
+
+ct=fread(here("RCP_data/Area1(10000cells)/ct85_2100.csv"))
+ct85=ct$`mean(Psurv)`[matching_rows]#extract values for 9810 cells
+
+smi=fread(here("RCP_data/Area1(10000cells)/smi85_2100.csv"))
+smi85=smi$`mean(SMImean)`[matching_rows]#extract values for 9810 cells
+
+rh=fread(here("RCP_data/Area1(10000cells)/rh85_2100.csv"))
+rh85=rh$`mean(\`Relative Humidity\`)`[matching_rows]#extract values for 9810 cells
+
+dd=fread(here("RCP_data/Area1(10000cells)/dd85_2100.csv"))
+dd85=dd$V2[matching_rows]#extract values for 9810 cells
+
+################################
+#get the median for each cell for all the covariates
+#for outbreak (2007-2014)
+id=rep(1:9810,8)#create id for 8 years data (2007-2014)
+d_o2=cbind(id,d_o1)#add id to data
+data_rcp_outbreak=as.numeric()#look for median values
+for(i in unique(d_o2$id)){
+  d2=d_o2[which(d_o2$id==i),-1]#remove id column
+  med=apply(d2,2,median)
+  data_rcp_outbreak=rbind(data_rcp_outbreak,c(i,med))#add id again
+}#get median values
+
+#beetle pressures are fixed
+data_rcp_outbreak=data.frame(data_rcp_outbreak)#set class
+data_rcp_outbreak$last.year.infestation.within.cell=3#last year's infestations within a cell is set to 3
+data_rcp_outbreak$dispersal=0.05#dispersal impact within a 4 km radius is set to be 0.05
+
+#estimate mean and probability of infestations from the abundance and presence models, respectively.
+mu1=exp(as.matrix(cbind(1,data_rcp_outbreak[,-1]))%*% cx1)#mean of the abundance model
+etaz <- as.vector(as.matrix(cbind(1,data_rcp_outbreak[,-1]))%*% cz1)
+pi1<-1-round(invlogit(etaz),5)#probability of infestation from the presence model
+
+#create data that contains 1 affected covariates and then a table contains all four affected covariates
+#replacing relative humidity by values under rcp 2.6, 4.5, 8.5.
+data_rcp_outbreak_rh26=data.frame(data_rcp_outbreak)
+data_rcp_outbreak_rh26$relativeHumidity=rh26#rcp 2.6
+
+data_rcp_outbreak_rh45=data.frame(data_rcp_outbreak)
+data_rcp_outbreak_rh45$relativeHumidity=rh45#rcp 4.5
+
+data_rcp_outbreak_rh85=data.frame(data_rcp_outbreak)
+data_rcp_outbreak_rh85$relativeHumidity=rh85#rcp 8.5
+
+#replacing soil moisture index by values under rcp 2.6, 4.5, 8.5.
+data_rcp_outbreak_smi26=data.frame(data_rcp_outbreak)
+data_rcp_outbreak_smi26$SMI=smi26#rcp 2.6
+
+data_rcp_outbreak_smi45=data.frame(data_rcp_outbreak)
+data_rcp_outbreak_smi45$SMI=smi45#rcp 4.5
+
+data_rcp_outbreak_smi85=data.frame(data_rcp_outbreak)
+data_rcp_outbreak_smi85$SMI=smi85#rcp 8.5
+
+#replacing degree days by values under rcp 2.6, 4.5, 8.5.
+data_rcp_outbreak_dd26=data.frame(data_rcp_outbreak)
+data_rcp_outbreak_dd26$degreeDays=dd26#rcp 2.6
+
+data_rcp_outbreak_dd45=data.frame(data_rcp_outbreak)
+data_rcp_outbreak_dd45$degreeDays=dd45#rcp 4.5
+
+data_rcp_outbreak_dd85=data.frame(data_rcp_outbreak)
+data_rcp_outbreak_dd85$degreeDays=dd85#rcp 8.5
+
+#replacing overwinter survival probability by values under rcp 2.6, 4.5, 8.5.
+data_rcp_outbreak_ct26=data.frame(data_rcp_outbreak)
+data_rcp_outbreak_ct26$coldTolerance=ct26
+
+data_rcp_outbreak_ct45=data.frame(data_rcp_outbreak)
+data_rcp_outbreak_ct45$coldTolerance=ct45
+
+data_rcp_outbreak_ct85=data.frame(data_rcp_outbreak)
+data_rcp_outbreak_ct85$coldTolerance=ct85
+
+#replacing all four covariates by values under rcp 2.6, 4.5, 8.5.
+data_rcp_outbreak_all26=data.frame(data_rcp_outbreak)
+data_rcp_outbreak_all26[,c(4,6,7,8)]=cbind(rh26,smi26,dd26,ct26)
+
+data_rcp_outbreak_all45=data.frame(data_rcp_outbreak)
+data_rcp_outbreak_all45[,c(4,6,7,8)]=cbind(rh45,smi45,dd45,ct45)
+
+data_rcp_outbreak_all85=data.frame(data_rcp_outbreak)
+data_rcp_outbreak_all85[,c(4,6,7,8)]=cbind(rh85,smi85,dd85,ct85)
+#
+#
+#mean and probability of occurrence for five scenarios including 1 affected covariates and all four affected covariates
+#mean and probability of infestations when replacing overwinter survival probability under climate change
+etaz<- as.vector(as.matrix(cbind(1,data_rcp_outbreak_ct26[,-1]))%*% cz1)
+pi_ct26_outbreak<-1-round(invlogit(etaz),5)#probability of infestations from the presence model under rcp 2.6
+mu_ct26_outbreak=exp(as.matrix(cbind(1,data_rcp_outbreak_ct26[,-1]))%*% cx1)#mean of the abundance model under rcp 2.6
+
+etaz<- as.vector(as.matrix(cbind(1,data_rcp_outbreak_ct45[,-1]))%*% cz1)
+pi_ct45_outbreak<-1-round(invlogit(etaz),5)#probability of infestations from the presence model under rcp 4.5
+mu_ct45_outbreak=exp(as.matrix(cbind(1,data_rcp_outbreak_ct45[,-1]))%*% cx1)#mean of the abudance model under rcp 4.5
+
+etaz<- as.vector(as.matrix(cbind(1,data_rcp_outbreak_ct85[,-1]))%*% cz1)
+pi_ct85_outbreak<-1-round(invlogit(etaz),5)#probability of infestations from the presence model under rcp 8.5
+mu_ct85_outbreak=exp(as.matrix(cbind(1,data_rcp_outbreak_ct85[,-1]))%*% cx1)#mean of the abundance model under rcp 8.5
+
+#mean and probability of infestations when replacing degree days under climate change
+etaz<- as.vector(as.matrix(cbind(1,data_rcp_outbreak_dd26[,-1]))%*% cz1)
+pi_dd26_outbreak<-1-round(invlogit(etaz),5)#probability of infestations from the presence model under rcp 2.6
+mu_dd26_outbreak=exp(as.matrix(cbind(1,data_rcp_outbreak_dd26[,-1]))%*% cx1)#mean of the abundance model under rcp 2.6
+
+etaz<- as.vector(as.matrix(cbind(1,data_rcp_outbreak_dd45[,-1]))%*% cz1)
+pi_dd45_outbreak<-1-round(invlogit(etaz),5)#probability of infestations from the presence model under rcp 4.5
+mu_dd45_outbreak=exp(as.matrix(cbind(1,data_rcp_outbreak_dd45[,-1]))%*% cx1)#mean of the abundance model under rcp 4.5
+
+etaz<- as.vector(as.matrix(cbind(1,data_rcp_outbreak_dd85[,-1]))%*% cz1)
+pi_dd85_outbreak<-1-round(invlogit(etaz),5)#probability of infestations from the presence model under rcp 8.5
+mu_dd85_outbreak=exp(as.matrix(cbind(1,data_rcp_outbreak_dd85[,-1]))%*% cx1)#mean of the abundance model under rcp 8.5
+
+#mean and probability of infestations when replacing relative humidity by values under climate change.
+etaz<- as.vector(as.matrix(cbind(1,data_rcp_outbreak_rh26[,-1]))%*% cz1)
+pi_rh26_outbreak<-1-round(invlogit(etaz),5)#proability of infestations from the presence model under rcp 2.6
+mu_rh26_outbreak=exp(as.matrix(cbind(1,data_rcp_outbreak_rh26[,-1]))%*% cx1)#mean of the abundance model under rcp 2.6
+
+etaz<- as.vector(as.matrix(cbind(1,data_rcp_outbreak_rh45[,-1]))%*% cz1)
+pi_rh45_outbreak<-1-round(invlogit(etaz),5)#probability of infestations from the presence model under rcp 4.5
+mu_rh45_outbreak=exp(as.matrix(cbind(1,data_rcp_outbreak_rh45[,-1]))%*% cx1)#mean of the abundance model under. rcp 4.5
+
+etaz<- as.vector(as.matrix(cbind(1,data_rcp_outbreak_rh85[,-1]))%*% cz1)
+pi_rh85_outbreak<-1-round(invlogit(etaz),5)#probability of infestations from the presence model under rcp 8.5
+mu_rh85_outbreak=exp(as.matrix(cbind(1,data_rcp_outbreak_rh85[,-1]))%*% cx1)#mean of the abundance model under rcp 8.5
+
+#mean and probability of infestations when replacing soil moisture index by values under climate change.
+etaz<- as.vector(as.matrix(cbind(1,data_rcp_outbreak_smi26[,-1]))%*% cz1)
+pi_smi26_outbreak<-1-round(invlogit(etaz),5)#probability of infestations from the presence model under rcp 2.6
+mu_smi26_outbreak=exp(as.matrix(cbind(1,data_rcp_outbreak_smi26[,-1]))%*% cx1)#mean of the abundance model under rcp 2.6
+
+etaz<- as.vector(as.matrix(cbind(1,data_rcp_outbreak_smi45[,-1]))%*% cz1)
+pi_smi45_outbreak<-1-round(invlogit(etaz),5)#probability of infestations from the presence model under rcp 4.5
+mu_smi45_outbreak=exp(as.matrix(cbind(1,data_rcp_outbreak_smi45[,-1]))%*% cx1)#mean of the abundance model under rcp 4.5
+
+etaz<- as.vector(as.matrix(cbind(1,data_rcp_outbreak_smi85[,-1]))%*% cz1)
+pi_smi85_outbreak<-1-round(invlogit(etaz),5)#probability of infestations from the presence model under rcp 8.5
+mu_smi85_outbreak=exp(as.matrix(cbind(1,data_rcp_outbreak_smi85[,-1]))%*% cx1)#mean of the abundance model under rcp 8.5
+
+#mean and probability when replacing all four covariates under climate change.
+etaz<- as.vector(as.matrix(cbind(1,data_rcp_outbreak_all26[,-1]))%*% cz1)
+pi_all26_outbreak<-1-round(invlogit(etaz),5)#probability of infestations from the presence model under rcp 2.6
+mu_all26_outbreak=exp(as.matrix(cbind(1,data_rcp_outbreak_all26[,-1]))%*% cx1)#mean of the abundance model under rcp 2.6
+
+etaz<- as.vector(as.matrix(cbind(1,data_rcp_outbreak_all45[,-1]))%*% cz1)
+pi_all45_outbreak<-1-round(invlogit(etaz),5)#probability of infestations from the presence model under rcp 4.5
+mu_all45_outbreak=exp(as.matrix(cbind(1,data_rcp_outbreak_all45[,-1]))%*% cx1)#mean of the abundance model under rcp 4.5
+
+etaz<- as.vector(as.matrix(cbind(1,data_rcp_outbreak_all85[,-1]))%*% cz1)
+pi_all85_outbreak<-1-round(invlogit(etaz),5)#probability of infestations from the presence model under rcp 8.5
+mu_all85_outbreak=exp(as.matrix(cbind(1,data_rcp_outbreak_all85[,-1]))%*% cx1)#mean of the abundance model under rcp 8.5
+
+#
+#
+#plot the outbreak in log scale
+#the scale for the presence model is 0 to 1.
+#look for the maximum and minimum of the log of mean of the abudance model so that different plots use the consistent scale color. bar
+maximum=max(log(mu1),log(mu_ct26_outbreak),log(mu_ct45_outbreak),log(mu_ct85_outbreak),
+            log(mu_dd26_outbreak),log(mu_dd45_outbreak),log(mu_dd85_outbreak),
+            log(mu_smi26_outbreak),log(mu_smi45_outbreak),log(mu_smi85_outbreak),
+            log(mu_rh26_outbreak),log(mu_rh45_outbreak),log(mu_rh85_outbreak),
+            log(mu_all26_outbreak),log(mu_all45_outbreak),log(mu_all85_outbreak))#maximum values of all mean
+
+minimum=min(log(mu1),log(mu_ct26_outbreak),log(mu_ct45_outbreak),log(mu_ct85_outbreak),
+            log(mu_dd26_outbreak),log(mu_dd45_outbreak),log(mu_dd85_outbreak),
+            log(mu_smi26_outbreak),log(mu_smi45_outbreak),log(mu_smi85_outbreak),
+            log(mu_rh26_outbreak),log(mu_rh45_outbreak),log(mu_rh85_outbreak),
+            log(mu_all26_outbreak),log(mu_all45_outbreak),log(mu_all85_outbreak))#minimum values of all mean
+
+#
+#
+xy=unique(data_9810[,2:3])#extract xy coordinates for area 1
+d1=cbind(xy,mu1)#a new data table
+colnames(d1)=c("x","y","Expected Number Of Infestations")#name the columns
+#log scale the expected number of infestations for a better vision
+d2=d1
+d2$`Expected Number Of Infestations`=log(d2$`Expected Number Of Infestations`)#mean of the abundance model is in the log scale.
+#plots of the historical values using median values and fixed beetle pressures (2007-2014).
+#plot of the mean of the abundance model.
+p=ggplot(data=d2,aes(x,y,fill=`Expected Number Of Infestations`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(minimum,maximum),name="log(Infestations)")+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.key.height = unit(0.13, "npc"),
+    legend.title = element_text(face = "bold", size = 24),
+    #element_blank(),
+    legend.text = element_text(size = 24)
+  )
+#plot of the probability of infestations from the presence model.
+d1=cbind(xy,pi1)
+colnames(d1)=c("x","y","Probability Of Ocurrence")
+p=ggplot(data=d1,aes(x,y,fill=`Probability Of Ocurrence`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(0,1),name="Probability")+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.key.height = unit(0.13, "npc"),
+    legend.title = element_text(face = "bold", size = 24),
+    legend.text = element_text(size = 24)
+  )
+p
+#######################################################################################################################################
+#
+#mean of the abundance model and probability of infestations of the presence model under climate change
+#mean and probability when replacing overwinter survival probability by values
+d1=cbind(xy,log(mu_ct26_outbreak))#mean of the abundance model, rcp 2.6
+colnames(d1)=c("x","y","Expected Number Of Infestations")#create table with the log of the mean
+p=ggplot(data=d1,aes(x,y,fill=`Expected Number Of Infestations`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(minimum,maximum))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.key.height = unit(0.13, "npc"),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,pi_ct26_outbreak)#probability of infestations of the presence model, rcp 2.6, overwinter survival probability
+colnames(d1)=c("x","y","Probability Of Ocurrence")
+p=ggplot(data=d1,aes(x,y,fill=`Probability Of Ocurrence`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(0,1))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.key.height = unit(0.13, "npc"),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,log(mu_ct45_outbreak))#mean of the abundance model, rcp 4.5, overwinter survival probability
+colnames(d1)=c("x","y","Expected Number Of Infestations")
+p=ggplot(data=d1,aes(x,y,fill=`Expected Number Of Infestations`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(minimum,maximum),name="log(Infestations)")+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.key.height = unit(0.13, "npc"),
+    legend.title = element_text(face = "bold", size = 24),
+    legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,pi_ct45_outbreak)
+colnames(d1)=c("x","y","Probability Of Ocurrence")#probability of infestations of the presence model under rcp 4.5, overwinter survival probability
+p=ggplot(data=d1,aes(x,y,fill=`Probability Of Ocurrence`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(0,1))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.key.height = unit(0.13, "npc"),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,log(mu_ct85_outbreak))
+colnames(d1)=c("x","y","Expected Number Of Infestations")#mean of the abundance model under rcp 8.5,overwinter survival probability
+p=ggplot(data=d1,aes(x,y,fill=`Expected Number Of Infestations`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(minimum,maximum))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,pi_ct85_outbreak)
+colnames(d1)=c("x","y","Probability Of Ocurrence")#probability of infestations of the presence model under rcp 8.5, overwinter survival probability
+p=ggplot(data=d1,aes(x,y,fill=`Probability Of Ocurrence`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(0,1))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+#mean and probability of infestations when replacing relative humidity by values under climate change
+d1=cbind(xy,log(mu_rh26_outbreak))
+colnames(d1)=c("x","y","Expected Number Of Infestations")#mean of the abundance model under rcp 2.6
+p=ggplot(data=d1,aes(x,y,fill=`Expected Number Of Infestations`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(minimum,maximum))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.key.height = unit(0.13, "npc"),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,pi_rh26_outbreak)
+colnames(d1)=c("x","y","Probability Of Ocurrence")#probability of infestation of the presence model under rcp 2.6
+p=ggplot(data=d1,aes(x,y,fill=`Probability Of Ocurrence`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(0,1))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.key.height = unit(0.13, "npc"),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,log(mu_rh45_outbreak))
+colnames(d1)=c("x","y","Expected Number Of Infestations")#mean of the abundance model under rcp 4.5
+p=ggplot(data=d1,aes(x,y,fill=`Expected Number Of Infestations`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(minimum,maximum))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.key.height = unit(0.13, "npc"),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,pi_rh45_outbreak)
+colnames(d1)=c("x","y","Probability Of Ocurrence")#probability of infestations of the presence model under rcp 4.5
+p=ggplot(data=d1,aes(x,y,fill=`Probability Of Ocurrence`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(0,1))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.key.height = unit(0.13, "npc"),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,log(mu_rh85_outbreak))
+colnames(d1)=c("x","y","Expected Number Of Infestations")#mean of the abundance model under rcp 8.5
+p=ggplot(data=d1,aes(x,y,fill=`Expected Number Of Infestations`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(minimum,maximum))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,pi_rh85_outbreak)
+colnames(d1)=c("x","y","Probability Of Ocurrence")#probability of infestation of the presence model under rcp 8.5
+p=ggplot(data=d1,aes(x,y,fill=`Probability Of Ocurrence`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(0,1))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+#mean and probability of infestations when replacing soil mositure index by values under climate change
+d1=cbind(xy,log(mu_smi26_outbreak))
+colnames(d1)=c("x","y","Expected Number Of Infestations")#mean of the abundance model under rcp 2.6
+p=ggplot(data=d1,aes(x,y,fill=`Expected Number Of Infestations`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(minimum,maximum))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text =element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,pi_smi26_outbreak)
+colnames(d1)=c("x","y","Probability Of Ocurrence")#probability of infestations of the presence model under rcp 2.6
+p=ggplot(data=d1,aes(x,y,fill=`Probability Of Ocurrence`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(0,1))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position = "none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,log(mu_smi45_outbreak))
+colnames(d1)=c("x","y","Expected Number Of Infestations")#mean of the abundance model under rcp 4.5
+p=ggplot(data=d1,aes(x,y,fill=`Expected Number Of Infestations`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(minimum,maximum))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+
+d1=cbind(xy,pi_smi45_outbreak)
+colnames(d1)=c("x","y","Probability Of Ocurrence")#probability of infestations of the presence model under rcp 4.5
+p=ggplot(data=d1,aes(x,y,fill=`Probability Of Ocurrence`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(0,1))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,log(mu_smi85_outbreak))
+colnames(d1)=c("x","y","Expected Number Of Infestations")#mean of the abundance model under rcp 8.5
+p=ggplot(data=d1,aes(x,y,fill=`Expected Number Of Infestations`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(minimum,maximum))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,pi_smi85_outbreak)
+colnames(d1)=c("x","y","Probability Of Ocurrence")#probability of infestations of the presence model under rcp 8.5
+p=ggplot(data=d1,aes(x,y,fill=`Probability Of Ocurrence`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(0,1))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+#mean and probability of infestations when replacing degree days by values under climate change
+d1=cbind(xy,log(mu_dd26_outbreak))
+colnames(d1)=c("x","y","Expected Number Of Infestations")#mean of the abundance model under rcp 2.6
+p=ggplot(data=d1,aes(x,y,fill=`Expected Number Of Infestations`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(minimum,maximum))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,pi_dd26_outbreak)
+colnames(d1)=c("x","y","Probability Of Ocurrence")#probability of infestations of the presence model under rcp 2.6
+p=ggplot(data=d1,aes(x,y,fill=`Probability Of Ocurrence`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(0,1))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,log(mu_dd45_outbreak))
+colnames(d1)=c("x","y","Expected Number Of Infestations")#mean of the abundance model under rcp 4.5
+p=ggplot(data=d1,aes(x,y,fill=`Expected Number Of Infestations`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(minimum,maximum))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,pi_dd45_outbreak)
+colnames(d1)=c("x","y","Probability Of Ocurrence")#probability of infestations of the presence model under rcp 4.5
+p=ggplot(data=d1,aes(x,y,fill=`Probability Of Ocurrence`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(0,1))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,log(mu_dd85_outbreak))
+colnames(d1)=c("x","y","Expected Number Of Infestations")#mean of the abundance model under rcp 8.5
+p=ggplot(data=d1,aes(x,y,fill=`Expected Number Of Infestations`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(minimum,maximum))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,pi_dd85_outbreak)
+colnames(d1)=c("x","y","Probability Of Ocurrence")#probability of infestations of the presence model under rcp 8.5
+p=ggplot(data=d1,aes(x,y,fill=`Probability Of Ocurrence`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(0,1))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+#mean and probaility of infestations when replacing all four covariates by values under climate change
+d1=cbind(xy,log(mu_all26_outbreak))
+colnames(d1)=c("x","y","Expected Number Of Infestations")#mean of the abundance model under rcp 2.6
+p=ggplot(data=d1,aes(x,y,fill=`Expected Number Of Infestations`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(minimum,maximum))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,pi_all26_outbreak)
+colnames(d1)=c("x","y","Probability Of Ocurrence")#probability of infestations of the presence model under rcp 2.6
+p=ggplot(data=d1,aes(x,y,fill=`Probability Of Ocurrence`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(0,1))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,log(mu_all45_outbreak))
+colnames(d1)=c("x","y","Expected Number Of Infestations")#mean of the abundance model under rcp 4.5
+p=ggplot(data=d1,aes(x,y,fill=`Expected Number Of Infestations`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(minimum,maximum))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,pi_all45_outbreak)
+colnames(d1)=c("x","y","Probability Of Ocurrence")#probability of infestations of the presence model under rcp 4.5
+p=ggplot(data=d1,aes(x,y,fill=`Probability Of Ocurrence`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(0,1))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,log(mu_all85_outbreak))
+colnames(d1)=c("x","y","Expected Number Of Infestations")#mean of the abundance model under rcp 8.5
+p=ggplot(data=d1,aes(x,y,fill=`Expected Number Of Infestations`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(minimum,maximum))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
+
+d1=cbind(xy,pi_all85_outbreak)
+colnames(d1)=c("x","y","Probability Of Ocurrence")#probability of infestations of the presence model under rcp 8.5
+p=ggplot(data=d1,aes(x,y,fill=`Probability Of Ocurrence`))+
+  geom_raster()+
+  scale_fill_viridis(option="magma",limit=c(0,1))+
+  coord_fixed(ratio = 1)+
+  theme_void() + 
+  theme(legend.position="none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.key.height = unit(0.13, "npc"),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 24)
+  )
+p
